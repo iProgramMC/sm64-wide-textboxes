@@ -23,6 +23,10 @@
 #include "text_strings.h"
 #include "types.h"
 
+
+s8 g_aButtonIsHeld = 0;
+#define C_CHARS_PER_FRAME ((g_aButtonIsHeld + 1) << 1) // make text scroll by faster if we're holding A or B
+
 u16 gDialogColorFadeTimer;
 s8 gLastDialogLineNum;
 s32 gDialogVariable;
@@ -877,10 +881,15 @@ s16 get_dialog_id(void) {
     return gDialogID;
 }
 
+
+int g_charactersCounted = 0;
+int g_charactersCountedMax = 0;
 void create_dialog_box(s16 dialog) {
     if (gDialogID == -1) {
         gDialogID = dialog;
         gDialogBoxType = DIALOG_TYPE_ROTATE;
+		g_charactersCounted = 0;
+		g_charactersCountedMax = 0;
     }
 }
 
@@ -889,6 +898,8 @@ void create_dialog_box_with_var(s16 dialog, s32 dialogVar) {
         gDialogID = dialog;
         gDialogVariable = dialogVar;
         gDialogBoxType = DIALOG_TYPE_ROTATE;
+		g_charactersCounted = 0;
+		g_charactersCountedMax = 0;
     }
 }
 
@@ -896,6 +907,8 @@ void create_dialog_inverted_box(s16 dialog) {
     if (gDialogID == -1) {
         gDialogID = dialog;
         gDialogBoxType = DIALOG_TYPE_ZOOM;
+		g_charactersCounted = 0;
+		g_charactersCountedMax = 0;
     }
 }
 
@@ -904,6 +917,8 @@ void create_dialog_box_with_response(s16 dialog) {
         gDialogID = dialog;
         gDialogBoxType = DIALOG_TYPE_ROTATE;
         gLastDialogResponse = 1;
+		g_charactersCounted = 0;
+		g_charactersCountedMax = 0;
     }
 }
 
@@ -922,11 +937,13 @@ void reset_dialog_render_state(void) {
     gLastDialogResponse = 0;
     gLastDialogPageStrPos = 0;
     gDialogResponse = 0;
+	g_charactersCounted = 0;
+	g_charactersCountedMax = 0;
 }
 
 #if defined(VERSION_JP) || defined(VERSION_SH)
-#define X_VAL1 -5.0f
-#define Y_VAL1 2.0
+#define X_VAL1 0.0f
+#define Y_VAL1 0
 #define Y_VAL2 4
 #else
 #define X_VAL1 -7.0f
@@ -950,7 +967,7 @@ void render_dialog_box_type(struct DialogEntry *dialog, s8 linesPerBox) {
             break;
         case DIALOG_TYPE_ZOOM: // Renders a dialog white box with zoom
             if (gDialogBoxState == DIALOG_STATE_OPENING || gDialogBoxState == DIALOG_STATE_CLOSING) {
-                create_dl_translation_matrix(MENU_MTX_NOPUSH, 65.0 - (65.0 / gDialogBoxScale),
+                create_dl_translation_matrix(MENU_MTX_NOPUSH, 130.0 - (130.0 / gDialogBoxScale),
                                               (40.0 / gDialogBoxScale) - 40, 0);
                 create_dl_scale_matrix(MENU_MTX_NOPUSH, 1.0 / gDialogBoxScale, 1.0 / gDialogBoxScale, 1.0f);
             }
@@ -959,7 +976,11 @@ void render_dialog_box_type(struct DialogEntry *dialog, s8 linesPerBox) {
     }
 
     create_dl_translation_matrix(MENU_MTX_PUSH, X_VAL1, Y_VAL1, 0);
-    create_dl_scale_matrix(MENU_MTX_NOPUSH, 1.1f, ((f32) linesPerBox / Y_VAL2) + 0.1, 1.0f);
+#if defined(VERSION_JP) || defined(VERSION_SH)
+    create_dl_scale_matrix(MENU_MTX_NOPUSH, 1.0f, ((f32) linesPerBox / Y_VAL2), 1.0f);
+#else
+    create_dl_scale_matrix(MENU_MTX_NOPUSH, 1.1f, ((f32) linesPerBox / Y_VAL2)+.1f, 1.0f);
+#endif
 
     gSPDisplayList(gDisplayListHead++, dl_draw_text_bg_box);
     gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
@@ -1212,6 +1233,8 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
 #ifndef VERSION_EU
     s16 linePos = 0;
 #endif
+	int charsDrawnSoFar = 0;
+	s8 newLineIgnore = 0;
 
     if (gDialogBoxState == DIALOG_STATE_HORIZONTAL) {
         // If scrolling, consider the number of lines for both
@@ -1249,18 +1272,6 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                 pageState = DIALOG_PAGE_STATE_END;
 #ifndef VERSION_EU
                 gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
-#endif
-                break;
-            case DIALOG_CHAR_NEWLINE:
-                lineNum++;
-#ifdef VERSION_EU
-                handle_dialog_scroll_page_state(lineNum, totalLines, &pageState, &xMatrix);
-                gDialogX = 0;
-#else
-                handle_dialog_scroll_page_state(lineNum, totalLines, &pageState, &xMatrix, &linePos);
-#ifdef VERSION_SH
-                mark = 0;
-#endif
 #endif
                 break;
 #ifdef VERSION_EU
@@ -1316,6 +1327,23 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                 mark = DIALOG_MARK_HANDAKUTEN;
                 break;
 #endif
+            case DIALOG_CHAR_NEWLINE:
+				newLineIgnore ^= 1;
+				if (!newLineIgnore) 
+				{
+					lineNum++;
+#ifdef VERSION_EU
+					handle_dialog_scroll_page_state(lineNum, totalLines, &pageState, &xMatrix);
+					gDialogX = 0;
+#else
+					handle_dialog_scroll_page_state(lineNum, totalLines, &pageState, &xMatrix, &linePos);
+#ifdef VERSION_SH
+					mark = 0;
+#endif
+#endif
+					break;
+				}
+				// treat newline as a normal space if we're ignoring it, we don't want stuff like "thecastle", "tocreate" and "PowerStars"
             case DIALOG_CHAR_SPACE:
 #ifdef VERSION_EU
                 gDialogX += gDialogCharWidths[DIALOG_CHAR_SPACE];
@@ -1333,7 +1361,7 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                 break;
 #if defined(VERSION_JP) || defined(VERSION_SH)
             case DIALOG_CHAR_PERIOD:
-                adjust_pos_and_print_period_char(&xMatrix, &linePos);
+                if (charsDrawnSoFar < g_charactersCounted) adjust_pos_and_print_period_char(&xMatrix, &linePos);
                 break;
 #else
             case DIALOG_CHAR_SLASH:
@@ -1346,26 +1374,26 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                 break;
             case DIALOG_CHAR_MULTI_THE:
 #ifdef VERSION_EU
-                render_multi_text_string_lines(STRING_THE, lineNum, linesPerBox, xMatrix, lowerBound, dialog);
+                if (charsDrawnSoFar < g_charactersCounted) render_multi_text_string_lines(STRING_THE, lineNum, linesPerBox, xMatrix, lowerBound, dialog);
 #else
-                render_multi_text_string_lines(STRING_THE, lineNum, &linePos, linesPerBox, xMatrix, lowerBound);
+                if (charsDrawnSoFar < g_charactersCounted) render_multi_text_string_lines(STRING_THE, lineNum, &linePos, linesPerBox, xMatrix, lowerBound);
 #endif
                 xMatrix = 1;
                 break;
             case DIALOG_CHAR_MULTI_YOU:
 #ifdef VERSION_EU
-                render_multi_text_string_lines(STRING_YOU, lineNum, linesPerBox, xMatrix, lowerBound, dialog);
+                if (charsDrawnSoFar < g_charactersCounted) render_multi_text_string_lines(STRING_YOU, lineNum, linesPerBox, xMatrix, lowerBound, dialog);
 #else
-                render_multi_text_string_lines(STRING_YOU, lineNum, &linePos, linesPerBox, xMatrix, lowerBound);
+                if (charsDrawnSoFar < g_charactersCounted) render_multi_text_string_lines(STRING_YOU, lineNum, &linePos, linesPerBox, xMatrix, lowerBound);
 #endif
                 xMatrix = 1;
                 break;
 #endif
             case DIALOG_CHAR_STAR_COUNT:
 #ifdef VERSION_EU
-                render_star_count_dialog_text(dialog, &xMatrix);
+                if (charsDrawnSoFar < g_charactersCounted) render_star_count_dialog_text(dialog, &xMatrix);
 #else
-                render_star_count_dialog_text(&xMatrix, &linePos);
+                if (charsDrawnSoFar < g_charactersCounted) render_star_count_dialog_text(&xMatrix, &linePos);
 #endif
                 break;
 #ifdef VERSION_EU
@@ -1383,13 +1411,13 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                         create_dl_translation_matrix(MENU_MTX_NOPUSH, xMatrix * 10, 0, 0);
                     }
 
-                    render_generic_char(strChar);
+                    if (charsDrawnSoFar < g_charactersCounted) render_generic_char(strChar);
                     xMatrix = 1;
                     linePos++;
 
                     if (mark != 0) {
                         create_dl_translation_matrix(MENU_MTX_PUSH, 5.0f, 7.0f, 0);
-                        render_generic_char(mark + 0xEF);
+                        if (charsDrawnSoFar < g_charactersCounted) render_generic_char(mark + 0xEF);
                         gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
                         mark = 0;
                     }
@@ -1403,7 +1431,7 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
                             MENU_MTX_NOPUSH, (f32)(gDialogCharWidths[DIALOG_CHAR_SPACE] * (xMatrix - 1)), 0, 0);
                     }
 
-                    render_generic_char(strChar);
+                    if (charsDrawnSoFar < g_charactersCounted) render_generic_char(strChar);
                     create_dl_translation_matrix(MENU_MTX_NOPUSH, (f32)(gDialogCharWidths[strChar]), 0, 0);
                     xMatrix = 1;
                     linePos++;
@@ -1417,7 +1445,7 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
         }
 
 #if defined(VERSION_JP)
-        if (linePos == 12) {
+        if (linePos == 24) {
             if (str[strIdx + 1] == DIALOG_CHAR_PERIOD) {
                 adjust_pos_and_print_period_char(&xMatrix, &linePos);
                 strIdx++;
@@ -1425,7 +1453,7 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
 
             if (str[strIdx + 1] == DIALOG_CHAR_COMMA) {
                 create_dl_translation_matrix(MENU_MTX_NOPUSH, xMatrix * 10, 0, 0);
-                render_generic_char(DIALOG_CHAR_COMMA);
+                if (charsDrawnSoFar < g_charactersCounted) render_generic_char(DIALOG_CHAR_COMMA);
                 strIdx++;
             }
 
@@ -1445,7 +1473,13 @@ void handle_dialog_text_and_pages(s8 colorMode, struct DialogEntry *dialog, s8 l
 #endif
 
         strIdx++;
+		charsDrawnSoFar++;
     }
+	if (gDialogBoxState != DIALOG_STATE_HORIZONTAL) {
+		g_charactersCounted += C_CHARS_PER_FRAME;
+		if (g_charactersCounted > g_charactersCountedMax) g_charactersCounted = g_charactersCountedMax;
+	}
+	g_charactersCountedMax = charsDrawnSoFar;
     gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
 
     if (gDialogBoxState == DIALOG_STATE_VERTICAL) {
@@ -1505,7 +1539,7 @@ void render_dialog_triangle_choice(void) {
 #endif
 
 void render_dialog_string_color(s8 linesPerBox) {
-    s32 timer = gGlobalTimer;
+    /*s32 timer = gGlobalTimer;
 
     if (timer & 0x08) {
         return;
@@ -1522,7 +1556,7 @@ void render_dialog_string_color(s8 linesPerBox) {
     }
 
     gSPDisplayList(gDisplayListHead++, dl_draw_triangle);
-    gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
+    gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);*/
 }
 
 void handle_special_dialog_text(s16 dialogID) { // dialog ID tables, in order
@@ -1659,11 +1693,11 @@ s8 gDialogCourseActNum = 1;
 
 #if defined(VERSION_JP) || defined(VERSION_SH)
 #define DIAG_VAL1 20
-#define DIAG_VAL3 130
+#define DIAG_VAL3 260
 #define DIAG_VAL4 4
 #else
 #define DIAG_VAL1 16
-#define DIAG_VAL3 132 // US & EU
+#define DIAG_VAL3 264 // US & EU
 #define DIAG_VAL4 5
 #endif
 #ifdef VERSION_EU
@@ -1736,15 +1770,22 @@ void render_dialog_entries(void) {
         case DIALOG_STATE_VERTICAL:
             gDialogBoxOpenTimer = 0.0f;
 
+            if ((gPlayer3Controller->buttonDown & (A_BUTTON | B_BUTTON))) {
+				g_aButtonIsHeld = 1;	
+			} else g_aButtonIsHeld = 0;
+			
             if ((gPlayer3Controller->buttonPressed & A_BUTTON)
                 || (gPlayer3Controller->buttonPressed & B_BUTTON)) {
-                if (gLastDialogPageStrPos == -1) {
-                    handle_special_dialog_text(gDialogID);
-                    gDialogBoxState = DIALOG_STATE_CLOSING;
-                } else {
-                    gDialogBoxState = DIALOG_STATE_HORIZONTAL;
-                    play_sound(SOUND_MENU_MESSAGE_NEXT_PAGE, gGlobalSoundSource);
-                }
+				
+				if (g_charactersCounted >= g_charactersCountedMax - 5) {
+					if (gLastDialogPageStrPos == -1) {
+						handle_special_dialog_text(gDialogID);
+						gDialogBoxState = DIALOG_STATE_CLOSING;
+					} else {
+						gDialogBoxState = DIALOG_STATE_HORIZONTAL;
+						play_sound(SOUND_MENU_MESSAGE_NEXT_PAGE, gGlobalSoundSource);
+					}
+				}
             }
 #if !defined(VERSION_JP)
             lowerBound = 1;
@@ -1752,8 +1793,9 @@ void render_dialog_entries(void) {
             break;
         case DIALOG_STATE_HORIZONTAL:
             gDialogScrollOffsetY += dialog->linesPerBox * 2;
-
             if (gDialogScrollOffsetY >= dialog->linesPerBox * DIAG_VAL1) {
+				g_charactersCounted = 0;
+				g_charactersCountedMax = 0;
                 gDialogTextPos = gLastDialogPageStrPos;
                 gDialogBoxState = DIALOG_STATE_VERTICAL;
                 gDialogScrollOffsetY = 0;

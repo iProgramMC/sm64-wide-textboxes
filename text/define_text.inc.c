@@ -47,7 +47,7 @@ const struct DialogEntry *const seg2_debug_text_table[] = {
 #undef DEFINE_DIALOG
 #define DEFINE_DIALOG(id, unused, linesPerBox, leftOffset, width, _) \
     static const struct DialogEntry dialog_entry_ ## id = { \
-        unused, linesPerBox, leftOffset, width, dialog_text_ ## id \
+        unused, linesPerBox, 28, width, dialog_text_ ## id \
     };
 
 #include "dialogs.h"
